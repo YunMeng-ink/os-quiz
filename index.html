@@ -935,6 +935,13 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  // Practice: select option
+  if (t.matches('[data-opt]')) {
+    t.closest('.q-card').querySelectorAll('.opt-btn').forEach(b => void b.classList.remove('selected'));
+    t.classList.add('selected');
+    return;
+  }
+
   // Practice: confirm answer
   if (t.matches('[data-confirm]')) {
     const id = t.dataset.confirm;
