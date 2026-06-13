@@ -1,0 +1,6 @@
+.ruff_cache
+__pycache__
+*.pyc
+# 原始题集及答案（由 parse_questions.py 编译为 questions.json 后不再需要）
+操作系统复习题集.md
+操作系统参考答案.md
