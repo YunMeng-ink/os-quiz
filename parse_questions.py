@@ -302,7 +302,10 @@ def parse_table(lines: list[str]) -> dict | None:
 
 
 def parse_answers():
-    """返回 dict: (type, chapter, number) → {answer, explanation}"""
+    """
+    返回 dict: (type, number) → {answer, explanation}
+    使用 First-Win 策略：同一 (type, number) 首次出现生效（后续辅助章节不覆盖）。
+    """
     text = A_FILE.read_text(encoding="utf-8")
 
     ANSWER_TYPE_MAP = {
@@ -319,7 +322,7 @@ def parse_answers():
 
     for i, sec in enumerate(sections):
         if i == 0:
-            continue  # 跳过文档标题 "# 操作系统参考答案"
+            continue
 
         sec_start = sec.end()
         sec_end = sections[i + 1].start() if i + 1 < len(sections) else len(text)
@@ -330,14 +333,12 @@ def parse_answers():
         if qtype is None:
             continue
 
-        # 截掉 "填空题推导过程" 子节（h3）
         if qtype == "fill":
             deriv_pos = sec_text.find("### 填空题推导过程")
             if deriv_pos != -1:
                 sec_text = sec_text[:deriv_pos]
 
-        if qtype in ("choice", "judge"):
-            # 表格在各 ## 章节中，直接扫整个区间的所有表格行
+        if qtype in ("choice", "judge", "fill"):
             rows = parse_answer_table_rows(sec_text)
             for row in rows:
                 if len(row) >= 2:
@@ -345,34 +346,18 @@ def parse_answers():
                         num = int(row[0].strip())
                         ans = row[1].strip()
                         expl = row[2].strip() if len(row) >= 3 else ""
-                        chap = find_chapter_for_number(qtype, num)
-                        if chap:
-                            answers[(qtype, chap, num)] = {
+                        key = (qtype, num)
+                        if key not in answers:
+                            answers[key] = {
                                 "answer": ans,
                                 "explanation": expl,
                             }
                     except ValueError:
                         continue
 
-        elif qtype == "fill":
-            rows = parse_answer_table_rows(sec_text)
-            for row in rows:
-                if len(row) >= 2:
-                    try:
-                        num = int(row[0].strip())
-                        ans = row[1].strip()
-                        chap = find_chapter_for_number(qtype, num)
-                        answers[(qtype, chap, num)] = {
-                            "answer": ans,
-                            "explanation": "",
-                        }
-                    except ValueError:
-                        continue
-
         elif qtype in ("short", "apply"):
             chapters = split_answer_by_chapter(sec_text)
             for chap_num, chap_text in chapters:
-                # 按 ### N. 分割
                 q_blocks = re.split(r"(?=^###\s+\d+\.)", chap_text, flags=re.MULTILINE)
                 for block in q_blocks:
                     block = block.strip()
@@ -382,22 +367,22 @@ def parse_answers():
                     if m:
                         num = int(m.group(1))
                         body = re.sub(r"^###\s+\d+\..*", "", block, count=1).strip()
-                        answers[(qtype, chap_num, num)] = {
-                            "answer": body,
-                            "explanation": "",
-                        }
+                        key = (qtype, num)
+                        if key not in answers:
+                            answers[key] = {
+                                "answer": body,
+                                "explanation": "",
+                            }
 
     return answers
 
 
 def parse_answer_table_rows(text: str) -> list[list[str]]:
-    """从 Markdown 表格文本中提取数据行。"""
     rows = []
     for line in text.split("\n"):
         line = line.strip()
         if line.startswith("|") and line.endswith("|"):
             cells = [c.strip() for c in line.strip("|").split("|")]
-            # 跳过表头行和分隔行
             if cells and not re.match(r"^:?-+:?$", cells[0].strip()):
                 if len(cells) >= 2:
                     rows.append(cells)
@@ -405,7 +390,6 @@ def parse_answer_table_rows(text: str) -> list[list[str]]:
 
 
 def split_answer_by_chapter(text: str) -> list[tuple[int, str]]:
-    """将答案文本按 ## 章节分割。"""
     chapters = []
     h2_re = re.compile(r"^##\s+(.+)$", re.MULTILINE)
     parts = list(h2_re.finditer(text))
@@ -415,27 +399,6 @@ def split_answer_by_chapter(text: str) -> list[tuple[int, str]]:
         end = parts[i + 1].start() if i + 1 < len(parts) else len(text)
         chapters.append((chap_num, text[start:end].strip()))
     return chapters
-
-
-_chapter_map: dict[str, dict[int, tuple[int, int]]] = {}
-
-
-def _build_chapter_map():
-    """构建 (type → {number: chapter}) 映射用于答案回溯"""
-    global _chapter_map
-    if _chapter_map:
-        return
-    questions = parse_questions()
-    for q in questions:
-        t = q["type"]
-        n = q["number"]
-        c = q["chapter"]
-        _chapter_map.setdefault(t, {})[n] = c
-
-
-def find_chapter_for_number(qtype: str, number: int) -> int:
-    _build_chapter_map()
-    return _chapter_map.get(qtype, {}).get(number, 0)
 
 
 # ─── 主流程 ──────────────────────────────────────────────────────
@@ -458,15 +421,9 @@ def main():
         type_counter[t] = type_counter.get(t, 0) + 1
         q["id"] = f"{t}-{type_counter[t]}"
 
-        # 先按 (type, chapter, number) 精确匹配
-        key = (q["type"], q["chapter"], q["number"])
+        # (type, number) 全局唯一，直接匹配
+        key = (q["type"], q["number"])
         ans = answers.get(key)
-        if not ans:
-            # 按 (type, number) 回退（兼容答案库章节与题库不一致的情况）
-            for (t, c, n), a in answers.items():
-                if t == q["type"] and n == q["number"]:
-                    ans = a
-                    break
         if ans:
             q["answer"] = ans["answer"]
             q["explanation"] = ans["explanation"]
@@ -482,8 +439,17 @@ def main():
         c = q["chapter"]
         stats["byChapter"][c] = stats["byChapter"].get(c, 0) + 1
 
-    # 输出清理
+    # 输出清理 & 答案归一化
     for q in questions:
+        # 为无答案题目添加占位标记
+        if not q.get("answer"):
+            type_hints = {
+                "algo": "（算法设计题，请参考教材相关章节）",
+                "apply": "（本题暂无参考答案）",
+                "short": "（本题暂无参考答案）",
+            }
+            q["answer"] = type_hints.get(q["type"], "")
+
         # 移除前端不需要的字段
         q.pop("text_lines", None)
         q.pop("chapterName", None)
