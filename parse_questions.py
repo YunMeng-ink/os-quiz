@@ -52,7 +52,7 @@ def strip_option_prefix(opt: str) -> str:
     """去掉选项前缀字母（'A. '、'B. ' 等），只保留内容。"""
     m = re.match(r"^\s*[A-Da-d]\.\s+", opt)
     if m:
-        return opt[m.end():].strip()
+        return opt[m.end() :].strip()
     return opt.strip()
 
 
@@ -490,7 +490,13 @@ def main():
         q.pop("options", None)
         # 填空题答案统一为数组（多空用 `；` 分隔）
         if q["type"] == "fill" and q.get("answer") and isinstance(q["answer"], str):
-            q["answer"] = [a.strip() for a in q["answer"].split("；")]
+            ans_parts = [a.strip() for a in q["answer"].split("；")]
+            bc = q.get("blankCount") or 1
+            # 若答案条目数超过空白数，剔除出现在题干中的条目（冗余题面文字）
+            if len(ans_parts) > bc:
+                qmd = q.get("questionMD", "")
+                ans_parts = [a for a in ans_parts if a not in qmd]
+            q["answer"] = ans_parts
         # 判断题答案归一化
         if q["type"] == "judge" and q.get("answer"):
             q["answer"] = (

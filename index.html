@@ -672,7 +672,7 @@ function gradeAnswer(q, userAns) {
     const ua = Array.isArray(userAns) ? userAns : [userAns];
     let correct = 0;
     for (let i = 0; i < Math.min(ansArr.length, ua.length); i++) {
-      if (normalizeAns(ua[i]) === normalizeAns(ansArr[i])) correct++;
+      if (matchFillAnswer(ua[i], ansArr[i])) correct++;
     }
     return correct === ansArr.length;
   }
@@ -682,6 +682,23 @@ function gradeAnswer(q, userAns) {
 
 function normalizeAns(s) {
   return String(s).trim().replace(/[，、]/g, ',').replace(/\s+/g, '').toLowerCase();
+}
+
+/** 宽松匹配：用户答案与参考答案之一（含括号别名）匹配即通过 */
+function matchFillAnswer(userAns, refAns) {
+  const nu = normalizeAns(userAns);
+  const candidates = [refAns];
+  // 展开括号别名：e.g. "FCB（文件控制块）" → "FCB" 或 "文件控制块"
+  // e.g. "管（核心/内核）" → "管" / "核心" / "内核"
+  const m = refAns.match(/（([^）]+)）/);
+  if (m) {
+    for (const alias of m[1].split('/')) {
+      candidates.push(alias.trim());
+    }
+    const body = refAns.replace(/（[^）]*）/g, '').trim();
+    if (body) candidates.push(body);
+  }
+  return candidates.some(c => normalizeAns(c) === nu);
 }
 
 function renderAnswerText(md) {
@@ -1134,7 +1151,7 @@ function handleConfirm(q, card, resultArea) {
     inputs.forEach((inp, i) => {
       const v = inp.value.trim();
       userAns.push(v);
-      const isCorrect = i < ansArr.length && normalizeAns(v) === normalizeAns(ansArr[i]);
+      const isCorrect = i < ansArr.length && matchFillAnswer(v, ansArr[i]);
       inp.classList.add(isCorrect ? 'correct' : 'wrong');
       if (!isCorrect) allCorrect = false;
     });
